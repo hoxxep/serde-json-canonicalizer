@@ -10,28 +10,6 @@ use serde_json::{
     ser::{CharEscape, Formatter, Serializer},
 };
 
-/// Serialize the given data structure as a JCS byte vector.
-///
-/// # Errors
-///
-/// Serialization can fail if `T`'s implementation of `Serialize` decides to
-/// fail, or if `T` contains a map with non-string keys.
-pub fn to_vec<S: Serialize>(value: &S) -> serde_json::Result<Vec<u8>> {
-    let mut buffer = Vec::with_capacity(1024);
-    to_writer(value, &mut buffer).map(|_| buffer)
-}
-
-/// Serialize the given data structure as JCS into the I/O stream.
-/// Serialization guarantees it only feeds valid UTF-8 sequences to the writer.
-///
-/// # Errors
-///
-/// Serialization can fail if `T`'s implementation of `Serialize` decides to
-/// fail, or if `T` contains a map with non-string keys.
-pub fn to_writer<S: Serialize, W: io::Write>(value: &S, writer: &mut W) -> serde_json::Result<()> {
-    value.serialize(&mut JcsSerializer::new(writer))
-}
-
 struct JsonProperty {
     sorting_key: Vec<u16>,
     key: Vec<u8>,
@@ -78,8 +56,12 @@ impl Ord for JsonProperty {
 
 type JsonObject = BTreeSet<JsonProperty>;
 
+/// The formatter that's used by the [JcsSerializer].
+///
+/// This formatter is not fully RFC 8785 compliant in its own right, because the [JcsSerializer] is
+/// instead responsible for handling floating point NaN and infinity.
 #[derive(Default)]
-struct JcsFormatter {
+pub(crate) struct JcsFormatter {
     objects: Vec<JsonObject>,
     keys: Vec<Vec<u8>>,
     buffers: Vec<Vec<u8>>,
@@ -475,7 +457,8 @@ impl Formatter for JcsFormatter {
     }
 }
 
-struct JcsSerializer<W: io::Write> {
+/// An RFC 8785 compatible JSON Canonicalization Scheme (JCS) serializer for [serde_json].
+pub(crate) struct JcsSerializer<W: io::Write> {
     serializer: Serializer<W, JcsFormatter>,
 }
 
@@ -486,6 +469,13 @@ impl<W: io::Write> JcsSerializer<W> {
         Self {
             serializer: Serializer::with_formatter(writer, JcsFormatter::default()),
         }
+    }
+
+    /// Consumes this serializer returning the underlying writer.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn into_inner(self) -> W {
+        self.serializer.into_inner()
     }
 }
 
